@@ -1,0 +1,135 @@
+---
+title: "load oef macro"
+author: "Tourism Economics"
+date: "Wednesday, October 15, 2014"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+
+Setup
+```{r readchunk}
+source('~/Project/R projects/hlt/scripts/functions.R')
+```
+
+
+As an input, this expects a csv file. This csv file can be created using the
+select file that I've set up and the OE macro model.
+
+```{r load_macro}
+#sets up to later shorten data based on current date 
+cur_year <- year(Sys.time())
+end_year <- cur_year +15
+end_year <- round(end_year,-1) -1
+end_date <- paste(end_year,"-10-01",sep="")
+```
+
+
+```{r load_macro2}
+
+fpath <- c("~/Project/R projects/hlt/")
+
+# when kniting from the button, I either needed the full path or to add "../" 
+# in front of each
+
+fname <- c("../input_data/HLTCHN_OEF_MACRO_2015_09_15.csv")
+# the check.names piece fixes the issueof the column names coming in with
+# quotes and spaces due to the Oxford file format that is visible when 
+# you open the csv file in notepad
+temp <- read.csv(fname, header=TRUE, sep=",", check.names=FALSE) 
+# puts column names into lower case
+names(temp) <- tolower(names(temp))
+# trims leading and trailing whitespace
+names(temp) <- str_trim(names(temp))
+colnames(temp)
+
+# changes $ and & in the wd_gdp$& column name
+col_temp <- colnames(temp) %>%
+  gsub("\\$&", "nusd", .) %>%
+  gsub("\\&", "n", .)
+colnames(temp) <- col_temp
+colnames(temp)
+
+
+# works on the date column to get into a date format
+# more difficult than I would have liked
+temp <- temp %>%
+  rename(date = dates) %>%
+  mutate(date = gsub("01$", "-01-01", date)) %>%
+  mutate(date = gsub("02$", "-04-01", date)) %>%
+  mutate(date = gsub("03$", "-07-01", date)) %>%
+  mutate(date = gsub("04$", "-10-01", date)) %>%
+  mutate(date = as.Date(date))
+
+temp_2 <- temp %>%
+  gather(geovar, value, -date) %>%
+  mutate(geovar = as.character(geovar)) %>%
+  # I think this separates on the first occurance of the underscore, 
+  # not all occurances
+  separate(geovar, c("geo", "variable"), sep = "\\_", extra="merge") 
+
+print(unique(temp_2$variable))
+
+macro_q <- temp_2 %>%
+  # renames "if" to "ifix" because r doesn't like "if" as a variable name
+  mutate(variable = ifelse(variable == "if", "ifix", variable)) %>%
+  # also, I didn't like wpo_wti as a variable name, because it has the 
+  # underscore, which is distracting, and may cause trouble
+  #mutate(variable = ifelse(variable == "wpo_wti", "wpowti", variable)) %>%
+  # changes codes for canada...
+  mutate(geo = ifelse(geo == "ca", "can", geo)) %>% # canada
+  mutate(geo = ifelse(geo == "mx", "mex", geo)) %>% # mexico
+  mutate(geo = ifelse(geo == "cn", "chn", geo)) %>% # china
+  # recombine the geo and var
+  mutate(geovar = paste(geo, variable, sep="_")) %>%
+  select(-geo, -variable) %>%
+  spread(geovar, value) %>%
+  read.zoo() %>%
+  xts(frequency=4)
+
+# shortens data based on end date established at start of script
+macro_q <- window(macro_q, end = end_date)
+```
+
+###A few plots
+```{r plots, echo=FALSE}
+
+autoplot(log(macro_q$chn_gdpsa)) + ggtitle("GDP, real, SA, log (seasonally adjusted by Oxford)") 
+autoplot(log(macro_q$chn_gdp)) + ggtitle("GDP, real, NSA, log")
+autoplot(log(macro_q$chn_gdpppp)) + ggtitle("GDP, real PPP basis, NSA, log (PPP basis is same as real series)")
+autoplot(log(macro_q$chn_gdpn)) + ggtitle("GDP, nominal, NSA, log") 
+autoplot(log(macro_q$chn_gdpsshot)) + ggtitle("GDP services, hotels and catering, real, NSA, log")
+
+autoplot(macro_q$chn_pc) + ggtitle("Consumer price deflator")
+autoplot(macro_q$chn_pgdp) + ggtitle("GDP price deflator") 
+
+# create short term data base for graphs
+st <- window(macro_q, start = as.Date("2000-01-01"), end = as.Date("2020-01-01"))
+
+autoplot(log(st$chn_gdpsa)) + ggtitle("GDP, SA, log (seasonally adjusted by Oxford)") 
+autoplot(diff(log(st$chn_gdpsa), lag=1)) + ggtitle("GDP, SA, quarter-to-quarter growth rate based on difference of logs 
+    \n (seasonally adjusted by Oxford)")
+
+autoplot(diff(log(st$chn_gdp), lag=4)) + ggtitle("GDP, real, year-over-year growth rate based on difference of logs")
+autoplot(diff(log(st$chn_gdpppp), lag=4)) + ggtitle("GDP, real PPP, year-over-year growth rate based on difference of logs")
+autoplot(diff(log(st$chn_gdpser), lag=4)) + ggtitle("GDP services, real, year-over-year growth rate based on difference of logs")
+
+# not sure why this returns a numeric series rather than a xts object
+# that I could use autoplot on. ma is a function in the forecast package,
+# I think diff is also in forecast package.
+a <- ma(st$chn_gdpser, 5, centre=TRUE)
+str(a)
+
+# creates output file
+out_macro_q <- macro_q
+```
+
+###Writing out files
+```{r write_output}
+# writes csv versions of the output files
+write.zoo(out_macro_q, file="../output_data/out_macro_q.csv", sep=",")
+# saves Rdata versions of the output files
+save(out_macro_q, file="../output_data/out_macro_q.Rdata")
+```
+

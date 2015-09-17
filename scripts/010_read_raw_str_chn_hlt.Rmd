@@ -1,0 +1,114 @@
+---
+title: "read_raw"
+author: "Tourism Economics"
+date: "September 15, 2015"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+Reads in the STR trend reports. Sets up naming. Saves output file.
+
+```{r readchunk}
+source('~/Project/R projects/hlt/scripts/functions.R')
+getwd()
+```
+
+# load STR data
+```{r load_str}
+
+# I've placed those in a sub-directory of the input directory
+
+# update this file path to point toward appropriate folder on your computer
+folder <- "../input_data/str/trend_reports/current_version"      
+file_list <- list.files(path=folder) #, pattern="*.xlsx")  
+file_list
+
+# when kniting from the button, I either needed the full path or to add "../" 
+# in front of each
+
+# set up as a loop format
+# I couldn't get the do.call approach to work because I needed
+# to add the market name in some way and couldn't figure out
+# how do it in a function. Didn't spend a whole lot of time
+# on it, thought a loop would be easy enough.
+data <- NULL
+ for (i in 1:length(file_list)) {
+   print(i)
+      # reads data for each file in the loop
+      # reads to access the name STR used
+      m_name <- read_excel(paste(folder, "//", file_list[i], 
+        sep=''), sheet = "8) Raw Data", skip=1, col_names = FALSE)
+      m_name <- as.character(m_name[1,1])
+      # reads data
+      tempa <- read_excel(paste(folder, "//", file_list[i], 
+        sep=''), sheet = "8) Raw Data", skip=4, col_names = FALSE)
+      # select to keep certain columns that we think will be right
+      tempa <- tempa %>%
+        select(X2, X9, X11, X13)
+      # renames columns based on first row
+      colnames(tempa) <- tempa[1,]
+      tempa <- tempa %>%
+        # adds the market name 
+        mutate(market = m_name)
+      
+      # following does a series of steps to clean the data, could be
+      # done after everything has been consolidated into a single data
+      # frame, but executes pretty quickly.
+      tempa <- tempa %>%
+        # filters to drop some rows
+        filter(!grepl("STR", Date) & !grepl("Date", Date) &  !is.na(Date)) %>%
+        # converts to numeric
+        mutate(Supply=as.numeric(as.character(Supply)),
+               Demand=as.numeric(as.character(Demand)),
+               Revenue=as.numeric(as.character(Revenue))) %>%
+        # pastes on 1 to be the day
+        mutate(date=paste("1", Date, sep=" ")) %>%
+        # converts to date using dmy from lubridate package
+        mutate(date=dmy(date)) %>%
+        # takes it out of POSIXlt format
+        mutate(date=as.Date(date)) %>%
+        select(date, market, supt=Supply, demt=Demand, rmrevt=Revenue)
+      
+      # rbinds the data into a single data frame
+      data <- rbind(data, tempa)
+ }
+  
+# take a look at market names
+a <- unique(data$market)
+print(a)
+
+# add geo codes
+data_a <- data %>%
+  # all are upscale and above
+  mutate(seg = "upa") %>%
+  # manually set these variables
+  mutate(geo = NA) %>%
+  mutate(geo = ifelse(market == "Market: Beijing Class: Luxury, Upper Up, Upscale Class ", "beijichn", geo)) %>%
+    mutate(geo = ifelse(market == "Market: Shanghai Class: Luxury, Upper Up, Upscale Class ", "shangchn", geo)) %>%
+    mutate(geo = ifelse(market == "Market: Sanya Class: Luxury, Upper Up, Upscale Class ", "sanyachn", geo)) %>%
+    mutate(geo = ifelse(market == "Market: Guangzhou Class: Luxury, Upper Up, Upscale Class ", "gngzhchn", geo)) %>%
+  mutate(geo = ifelse(market == "Market: Chengdu Class: Luxury, Upper Up, Up Class ", "chgduchn", geo)) %>%
+  mutate(geo = ifelse(market == "Continental China Class: Luxury, Upper Up, Upscale Class ", "chn", geo)) %>%
+  # drops market column
+  select(-market)
+
+# melts data and creates a column combining segment, geography and variable
+data_b <- data_a %>%
+  mutate(seggeo = paste0(seg, geo)) %>%
+  select(-seg, -geo) %>%
+  gather(var, value, -date, -seggeo) %>%
+  mutate(segvar = paste(seggeo, var, sep="_")) %>%
+  select(-seggeo, -var) %>%
+  spread(segvar, value)
+
+raw_str_hlt_chn <- data_b
+
+```
+
+```{r save_output}
+# saves Rdata version of the data
+save(raw_str_hlt_chn, file="../output_data/raw_str_hlt_chn.Rdata")
+
+```
+

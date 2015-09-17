@@ -13,32 +13,36 @@ source("scripts/functions.R")
 
 # read raw STR monthly files
 # results saved in Rdata file (dataframe)
-source("scripts/010_read_raw_str_hlt_chn.R")
-source("scripts/011_read_raw_str_ihg_mex.R")
-source("scripts/012_read_raw_str_ihg_can.R")
-source("scripts/013_read_raw_str_us_host.Rmd")
+rmarkdown::render('scripts/010_read_raw_str_chn_hlt.Rmd')
 
 # create monthl and quarterly seasonal factors, only run if necessary
+# starts with raw monthly data, no need for a quarterly file
 # results saved in Rdata files (dataframe)
-#source("scripts/014_create_seasonal.R")
+#source("scripts/015_create_seasonal.R")
 
 # preps the STR data, including creating seasonal adjusted from factors
 # results saved in Rdata (xts) and csv files 
 source("scripts/020_prep_str.R")
-source("scripts/021_prep_str_host.R")
-
-# reads STR opens and closes directly from Excel source file
-# results saved in Rdata (xts) and csv files
-source("scripts/030_load_str_openclose.R")
 
 # reads macro source file
 # results saved in Rdata (xts) and csv files
-rmarkdown::render('scripts/040_load_usmacro.Rmd')
-#knit("scripts/load_usmacro.Rmd")
+rmarkdown::render('scripts/040_load_macro.Rmd')
 
-# creates the ushist file
-knit("scripts/050_create_ushist.Rmd")
-knit("scripts/051_create_ushist_host.Rmd")
+# pulls GCT data
+source("scripts/045_oe_gct_pull.R")
+
+# pulls Asia Cities data
+source("scripts/046_oe_acities_pull.R")
+
+# pulls Global Cities data
+source("scripts/047_oe_gcities_pull.R")
+
+# pulls TDM data
+rmarkdown::render('scripts/048_oe_tdm_pull.Rmd')
+
+# create the hist file
+rmarkdown::render('scripts/050_create_hist.Rmd')
+
 
 # runs simple forecast 
 #source("scripts/060_simple_forecast.R")

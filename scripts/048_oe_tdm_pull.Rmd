@@ -1,0 +1,168 @@
+---
+title: "oe tdm pull"
+author: "Tourism Economics"
+date: "September 17, 2015"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+
+Setup
+```{r readchunk}
+source('~/Project/R projects/hlt/scripts/functions.R')
+```
+
+
+As an input, this expects an Excel file.
+```{r load_macro}
+# when kniting from the button, I either needed the full path or to add "../" 
+# in front of each
+
+# imports manual crosswalk with oe location codes
+colc <- rep("character", 4)
+manual_cw <- read.csv("../input_data/manual_cw_oetdm_country.csv", head=TRUE, colClasses=colc)
+
+# reads in an OE Asian Cities csv file using Hadley's readxl and saves as Rdata
+temp_a <- read_excel("../input_data/TDM - HLT - China_2015_09_17.xlsx", sheet=2)
+
+```
+
+
+```{r format}
+
+################
+#
+# formats data and appends area codes
+
+# removes columns that are all NA
+temp_b <- Filter(function(x)!all(is.na(x)), temp_a)
+# formats column names
+colnames(temp_b) <- colnames(temp_b) %>%
+  make.names() %>%
+  tolower() %>%
+  gsub("\\.", "\\_", .)
+
+# When gathering variables, we need to provide the name of the new key-value 
+# columns to create. The first argument, is the name of the key column, which 
+# is the name of the variable defined by the values of the column headings. In 
+# this case, it's date. The second argument is the name of the value column, in
+# this case it's value.
+
+temp_c <- temp_b %>%
+  gather(date, value, x1988:x2025) %>%
+  mutate(date = gsub("x", "", date)) %>%
+  mutate(date = as.Date(paste(date, "-01-01", sep=""))) %>%
+  mutate(indicator_code = tolower(indicator_code))
+
+unique(temp_c$oegc_location)
+
+# are any of the indicator codes duplicated, zero for none (if dataframe
+# has only one country that is)
+anyDuplicated(temp_b$indicator_code)
+
+# joins on area_code_sh
+temp_d <- temp_c %>%
+  left_join(., manual_cw, by=c("location_code" = "location_code")) %>%
+  select(date, country_abb, indicator_code, value)
+
+# show indicator codes
+unique(temp_d$indicator_code)
+```
+
+
+```{r select}
+# select only a few series to keep, convert to zoo
+temp_f <- temp_d %>%
+  # filter based on whether the contents are in a vector
+  #filter(oe_code %in% c("gdp")) %>%
+  # get ready to convert to xts
+  mutate(vargeo = paste(indicator_code, country_abb, sep="_")) %>%
+  select(date, vargeo, value) %>%
+  spread(vargeo, value) %>%
+  # because it complained about a bad entry when going to zoo
+  data.frame() %>%
+  read.zoo(regular=TRUE) %>%
+  xts()
+
+# spread to tidy format
+out_tdm_a <- temp_f %>%
+  data.frame(date=time(.), .) %>%
+  gather(vargeo, value, -date) %>%
+  separate(vargeo, c("var", "area_sh"), sep = "_", extra="merge") %>%
+  spread(var, value) 
+```
+
+```{r}
+##########
+#
+# convert to quarterly
+
+
+# next uses na.spline to convert to quarterly
+# Note: In the Global Model, China GDP is four quarterly values that sum 
+# to an annual total. This is similar for US GDP. So BEA presents quarterly
+# data at an annualized rate. But OE Global Model has it as quarterly
+# values that sum to an annual value. 
+# The following approach seems to put the annual value as the first quarter
+# and then fills in the remaining quarter. I searched but can't figure out the 
+# alternatives right now. 
+
+temp_h <- temp_f %>%
+  # uses the na.spline function in zoo to convert from annual to quarterly
+  # from the start of the zoo object to the end
+  # I think this is putting the annual value as the first quarter, and then filling
+  # in the remaining quarters
+  lapply(., FUN=na.spline, xout = seq(start(.), end(.), by = "quarter", method = "hyman")) %>%
+  do.call("merge", .) %>%
+  data.frame(date=time(.), .) %>%
+  read.zoo %>%
+  xts()
+```
+
+
+
+###A few plots
+```{r plots, echo=FALSE}
+colnames(temp_h)
+autoplot(diff(log(temp_h$tourf_chn))) + ggtitle("Total visitor arrivals, long-term")
+
+# create short term data base for graphs
+temp_h_st <- window(temp_h, start = as.Date("2000-01-01"))
+
+# graphs
+autoplot(log(temp_h_st$tourf_chn)) + ggtitle("Total visitor arrivals")
+autoplot(diff(log(temp_h_st$tourf_chn)))+ ggtitle("Total visitor arrivals, quarter-to-quarter growth")
+
+autoplot(log(temp_h_st$tourfstay_chn)) + ggtitle("Overnight visitor arrivals")
+autoplot(diff(log(temp_h_st$tourfstay_chn))) + ggtitle("Overnight visitor arrivals, quarter-to-quarter growth")
+
+autoplot(log(temp_h_st$fnightstot_chn)) + ggtitle("Total nights in all accommodation types, international visitors")
+autoplot(diff(log(temp_h_st$fnightstot_chn))) + ggtitle("Total nights in all accommodation types, international visitors, quarter-to-quarter growth")
+
+autoplot(log(temp_h_st$fnightshotel_chn)) + ggtitle("Total nights in hotels, international visitors")
+autoplot(diff(log(temp_h_st$fnightshotel_chn))) + ggtitle("Total nights in hotels, international visitors, quarter-to-quarter growth")
+
+```
+
+```{r}
+# spread to tidy format
+out_tdm_q <- temp_h %>%
+  data.frame(date=time(.), .) %>%
+  gather(vargeo, value, -date) %>%
+  separate(vargeo, c("var", "area_sh"), sep = "_", extra="merge") %>%
+  spread(var, value) 
+
+```
+
+
+###Writing out files
+```{r write_output}
+# writes csv versions of the output files
+write.zoo(out_tdm_a, file="../output_data/out_tdm_a.csv", sep=",")
+write.zoo(out_tdm_q, file="../output_data/out_tdm_q.csv", sep=",")
+# saves Rdata versions of the output files
+save(out_tdm_a, file="../output_data/out_tdm_a.Rdata")
+save(out_tdm_q, file="../output_data/out_tdm_q.Rdata")
+```
+
